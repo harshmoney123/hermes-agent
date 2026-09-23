@@ -82,3 +82,33 @@ def test_missing_outer_team_remains_unknown_for_multiple_workspaces():
     assert adapter._event_team_id({"ts": "123.456"}, {}) == ""
 
 
+def test_slack_connect_message_delivered_by_two_workspaces_yields_one_turn():
+    """A Slack Connect channel shared by two workspaces that both installed the app delivers
+    the same message once per team. Only the first delivery may pass the prefilter."""
+    import asyncio
+
+    adapter = SlackAdapter.__new__(SlackAdapter)
+    adapter._team_clients = {"T_ONE": object(), "T_TWO": object()}
+    adapter._dedup = MessageDeduplicator(ttl_seconds=1800)
+    adapter._is_ignored_channel = lambda _c: False
+
+    async def _not_bot(_e):
+        return False
+
+    adapter._drop_bot_sender = _not_bot
+    event = {"type": "message", "channel": "C_SHARED", "ts": "1790000000.000100", "user": "U1"}
+
+    async def run():
+        shared = {"is_ext_shared_channel": True}
+        first = await adapter._prefilter_inbound(dict(event), {"team_id": "T_ONE", **shared})
+        second = await adapter._prefilter_inbound(dict(event), {"team_id": "T_TWO", **shared})
+        other = await adapter._prefilter_inbound(
+            dict(event, ts="1790000000.000200"), {"team_id": "T_TWO", **shared})
+        return first, second, other
+
+    first, second, other = asyncio.run(run())
+    assert first is not None
+    assert second is None
+    assert other is not None
+
+

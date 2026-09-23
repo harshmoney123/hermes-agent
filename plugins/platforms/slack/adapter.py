@@ -4182,6 +4182,14 @@ class SlackAdapter(BasePlatformAdapter):
         if event_ts and self._dedup.is_duplicate(self._workspace_event_id(dedup_team_id, event_ts)):
             return None
         channel_id = event.get("channel", "")
+        # Slack Connect: one message in a channel shared by two workspaces that both installed
+        # this app is delivered once per workspace, with different team ids. Channel ids are
+        # global across Slack Connect, so (channel, ts) identifies the message regardless of team.
+        # Gated on Slack's envelope flag: non-shared ids are workspace-local and may collide.
+        if (event_ts and channel_id and isinstance(payload, dict)
+                and payload.get("is_ext_shared_channel") is True
+                and self._dedup.is_duplicate(f"chan:{channel_id}:{event_ts}")):
+            return None
         if self._is_ignored_channel(channel_id):
             logger.info("[Slack] Ignoring message in configured ignored channel %s", channel_id)
             return None
