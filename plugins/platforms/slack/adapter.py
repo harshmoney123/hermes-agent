@@ -4501,6 +4501,16 @@ class SlackAdapter(BasePlatformAdapter):
         if event_ts and self._dedup.is_duplicate(self._workspace_event_id(dedup_team_id, event_ts)):
             return None
         channel_id = event.get("channel", "")
+        # ENG-1954: one mention arrives via both the ``message`` and ``app_mention`` listeners.
+        # In Slack Connect channels the two envelopes can resolve to different workspace ids
+        # (poster's ``team`` vs the install's ``team_id``), so the team-scoped key above misses.
+        # (channel, ts) is the logical message identity regardless of listener; scope it by the
+        # receiving install (outer payload only, never the poster's ``event.team``) so the same
+        # Slack-local ids in two separate installs stay isolated.
+        install_team = self._event_team_id({}, payload) if isinstance(payload, dict) else ""
+        if channel_id and event_ts and self._dedup.is_duplicate(
+                f"chan:{install_team}:{channel_id}:{event_ts}"):
+            return None
         if self._is_ignored_channel(channel_id):
             logger.info("[Slack] Ignoring message in configured ignored channel %s", channel_id)
             return None
